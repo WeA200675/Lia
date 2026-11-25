@@ -1,5 +1,6 @@
 import os
 import secrets
+from threading import BoundedSemaphore
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -7,6 +8,7 @@ from openai import OpenAI, OpenAIError
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Senioren_Assistent_API")
+CHAT_SLOTS = BoundedSemaphore(4)
 SYSTEM_PROMPT = (
     "Du bist Lia, eine empathische Alltagsbegleiterin. "
     "Antworte kurz und herzlich. Stelle höchstens eine Frage. "
@@ -53,6 +55,8 @@ def chat_with_mother(request: ChatRequest):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(msg.model_dump() for msg in request.history)
     messages.append({"role": "user", "content": request.text_input})
+    if not CHAT_SLOTS.acquire(blocking=False):
+        raise HTTPException(429, "KI ausgelastet", headers={"Retry-After": "2"})
     try:
         with OpenAI(api_key=key or "local", base_url=base, timeout=15.0, max_retries=0) as client:
             response = client.chat.completions.create(
@@ -64,6 +68,8 @@ def chat_with_mother(request: ChatRequest):
         return {"reply": reply}
     except OpenAIError:
         raise HTTPException(503, "KI derzeit nicht erreichbar") from None
+    finally:
+        CHAT_SLOTS.release()
 
 
 @app.post("/api/analyze", response_model=AnalysisResponse, dependencies=[Depends(authorize)])
