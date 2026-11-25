@@ -4,10 +4,18 @@ from threading import BoundedSemaphore
 from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from openai import OpenAI, OpenAIError
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Senioren_Assistent_API")
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request, _exc):
+    # Validation errors can otherwise echo private conversation input.
+    return JSONResponse(status_code=422, content={"detail": "Ungültige Anfrage"})
+
+
 CHAT_SLOTS = BoundedSemaphore(4)
 SYSTEM_PROMPT = (
     "Du bist Lia, eine empathische Alltagsbegleiterin. "
